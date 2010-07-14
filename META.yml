@@ -1,0 +1,24 @@
+--- #YAML:1.0
+name:               Term-Shell-MultiCmd
+version:            1.01
+abstract:           Shell Interface with nested commands tree
+author:
+    - Josef Ezra <jezra@cpan.org>
+license:            perl
+distribution_type:  module
+configure_requires:
+    ExtUtils::MakeMaker:  0
+build_requires:
+    ExtUtils::MakeMaker:  0
+requires:
+    Term::ReadLine:    0
+    Test::More:        0
+    Text::ParseWords:  0
+no_index:
+    directory:
+        - t
+        - inc
+generated_by:       ExtUtils::MakeMaker version 6.56
+meta-spec:
+    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
+    version:  1.4
