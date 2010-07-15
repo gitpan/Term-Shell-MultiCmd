@@ -6,4 +6,7 @@ Revision history for Term-Shell-MultiCmd
 1.01   2010-07-14   : jezra
        After more work, it seems to be mature enough to be cpan uploaded.
 
+1.02   2010-07-15   : jezra
+       Eliminated one test, which seems to fail in Term::ReadLine (regardless this module)
+       
 

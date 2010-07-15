@@ -11,11 +11,11 @@ Term::Shell::MultiCmd - Shell Interface with nested commands tree
 
 =head1 VERSION
 
-Version 1.01
+Version 1.02
 
 =cut
 
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 
 =head1 SYNOPSIS
 
@@ -286,7 +286,7 @@ Options:
     use Term::ReadLine;
     my $t = eval { local $SIG{__WARN__} = 'IGNORE' ;
                    $o -> {term} = Term::ReadLine->new($o->{prompt}) } ;
-    $t or die "Can't create Term::ReadLine: $@\n" ;
+    die "Can't create Term::ReadLine: $@\n" if ! $t and -t select ;
 
     if (defined $readline::rl_completion_function) {
         $readline::rl_completion_function =
