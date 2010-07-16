@@ -13,6 +13,10 @@ Revision history for Term-Shell-MultiCmd
 1.03   2010-07-15
        POD format fixes, avoid another test fail case when /dev/tty is not readable.
 
+1.04   2010-07-16
+       More POD format & grammer fixes.
+
+
 
 
 

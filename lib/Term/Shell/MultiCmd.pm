@@ -9,13 +9,9 @@ use Carp ;
 
 Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
-=head1 VERSION
-
-Version 1.03
-
 =cut
 
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 =head1 SYNOPSIS
 
@@ -226,7 +222,7 @@ Overwrite the default 'quit' command, empty string would skip adding this comman
 
 This is the history file name. If present, try to load history from this file just
 before the loop command, and try saving history in this file after the loop command.
-Default is empty string (i.e. no history preserved between sessions). Please note that
+Default is an empty string (i.e. no history preserved between sessions). Please note that
 things might get tricky if that if multiple sessions are running at the same time.
 
 =item * -history_size
@@ -235,7 +231,7 @@ Overwrite the default 100 history entries to save in hisotry_file (if exists).
 
 =item * -history_more
 
-If history_file exists, try to load this data from the file before the loop starts, and save it after.
+If the history_file exists, try to load this data from the file before the loop starts, and save it after.
 For Example:
 
    my %user_defaults ;
@@ -318,7 +314,7 @@ Options:
                       -comp => \&my_completion_function,
                     ) ;
 
-This is function adds an command item to the command tree. It is a little complicated, but useful (or so I hope).
+This function adds an command item to the command tree. It is a little complicated, but useful (or so I hope).
 
 =over
 
@@ -352,7 +348,7 @@ is called), the whole string would be presented as the full help for this item.
 =item * -comp
 
 B<Expecting CODE, or ARRAY ref.>
-If Array, when user hits tab completion for this command, try to complete his input with words
+If Array, when the user hits tab completion for this command, try to complete his input with words
 from this list.
 If Code, call this function with the next parameters:
 
@@ -376,7 +372,7 @@ standard Getopt::Long options. For example:
 
      -opts => 'force name=s flag=i@'
 
-Would populating the previously described %p hash, correspond to user command:
+This would populating the previously described %p hash, correspond to user command:
 
      shell> user command -name="Some String" -flag 2 -flag 3 -flag 4 -force
 
@@ -385,7 +381,7 @@ For more information, see Getopt::Long. Also see examples/multi_option.pl in dis
 
 As ARRAY ref, caller can also add a complete 'instruction' after each non-flag option (i.e. an option that
 expects parameters). Like the 'comp' above, this 'instruction' must be an ARRAY or CODE ref, and follow
-the same roles. If omitted, a default function would be called and ask user for input.
+the same roles. When omitted, a default function would be called and ask the user for input.
 For example:
 
     -opts => [ 'verbose' =>
@@ -437,7 +433,7 @@ sub add_exec {
 
 =head2 add_help
 
-Although caller can set help via the add_exec, this command is useful when he wishes to
+Although help string can set in add_exec, this command is useful when he wishes to
 add title (or hint) to a part of the command path. For example:
 
    # assume $cli with commands 'feature set', 'feature get', etc.
@@ -507,7 +503,7 @@ sub populate {
 
   $cli -> loop ;
 
-Prompt, parse, and invoke in endless loop
+Prompt, parse, and invoke in an endless loop
 
 ('endless loop' should never be taken literally. Users quit, systems crash, universes collapse -
  and the loop reaches its last cycle)
@@ -677,7 +673,7 @@ sub _help_command_comp {
  $cli -> cmd ( "help -tree" ) ;
 
 Execute the given string parameter, similarly to user input. This one might be useful to execute
-commands in a script, or testings.
+commands in a script, or testing.
 
 =cut
 
