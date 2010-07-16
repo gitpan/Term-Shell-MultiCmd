@@ -7,19 +7,20 @@ use Carp ;
 
 =head1 NAME
 
-Term::Shell::MultiCmd - Shell Interface with nested commands tree
+Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
 =head1 VERSION
 
-Version 1.02
+Version 1.03
 
 =cut
 
-our $VERSION = '1.02';
+our $VERSION = '1.03';
 
 =head1 SYNOPSIS
 
-    # More examples available with the distribution, under directory 'examples/'
+    # Examples are available with the distribution, under directory 'examples/'
+    # This one is named examples/synopsis.pl
 
     use Term::Shell::MultiCmd;
     my @command_tree =
@@ -65,7 +66,6 @@ Term::ReadLine and Term::ReadKey.
 There are numberless ways of doing it, one of them is running 'cpan update Bundle::CPAN' (with a proper write permission).
 
 =cut
-
 # some of my common utility functions:
 sub _params($@) {
 
@@ -208,9 +208,9 @@ Optional Parameters for the new command:
 
 =item * -prompt
 
-my $cli = Term::Shell::MultiCmd ( -prompt => 'myprompt> ') ;
+    my $cli = Term::Shell::MultiCmd ( -prompt => 'myprompt> ') ;
 
-Set prompt to myprompt> (including the bigger than sign). Default is 'shell> '.
+Overwrite the default prompt 'shell> '.
 
 =item * -help_cmd
 
@@ -222,32 +222,36 @@ Overwrite the default 'quit' command, empty string would skip adding this comman
 
 =item * -history_file
 
-This is the history file name. If present, try to load history from this file at
-the before the loop command, and try saving history in this file after the loop command.
-Default is empty string (i.e. no history preserved between sessions).
+    my $cli = Term::Shell::MultiCmd ( -history_file => "$ENV{HOME}/.my_progarms_data" ) ;
+
+This is the history file name. If present, try to load history from this file just
+before the loop command, and try saving history in this file after the loop command.
+Default is empty string (i.e. no history preserved between sessions). Please note that
+things might get tricky if that if multiple sessions are running at the same time.
 
 =item * -history_size
 
-If history_file exists, set the number of history items to preserve. Default is 100.
+Overwrite the default 100 history entries to save in hisotry_file (if exists).
 
 =item * -history_more
 
-If history_file exists, try to load this data from the file before the loop, and try save it after.
+If history_file exists, try to load this data from the file before the loop starts, and save it after.
 For Example:
- my %user_defaults ;
- my $cli = new Term::Shell::MultiCmd ( -history_file => "$ENV{HOME}/.my_saved_data",
-                                       -history_size => 200,
-                                       -history_more => \%user_defaults,
-                                     ) ;
- ....
- $cli -> loop ;
 
- This would load shell's history and %user_defaults from the file .my_saved_data before the loop, and
- store 200 history entries and %user_defaults in the file after the loop.
+   my %user_defaults ;
+   my $cli = new Term::Shell::MultiCmd ( -history_file => "$ENV{HOME}/.my_saved_data",
+                                         -history_size => 200,
+                                         -history_more => \%user_defaults,
+                                        ) ;
+   # ....
+   $cli -> loop ;
 
-Please note:
- - The value of history_more must be a reference for HASH, ARRAY, or SCALAR
- - No warnings would be provided if any of the operations fail. Use it on your own risk.
+This would load shell's history and %user_defaults from the file .my_saved_data before the loop, and
+store 200 history entries and %user_defaults in the file after the loop.
+
+Note that the value of history_more must be a reference for HASH, ARRAY, or SCALAR. And
+no warnings would be provided if any of the operations fail. It wouldn't be a good idea
+to use it for sensitive data.
 
 =back
 
@@ -286,9 +290,10 @@ Options:
     use Term::ReadLine;
     my $t = eval { local $SIG{__WARN__} = 'IGNORE' ;
                    $o -> {term} = Term::ReadLine->new($o->{prompt}) } ;
-    die "Can't create Term::ReadLine: $@\n" if ! $t and -t select ;
-
-    if (defined $readline::rl_completion_function) {
+    if (not $t ) {
+        die "Can't create Term::ReadLine: $@\n" if -t select ;
+    }
+    elsif (defined $readline::rl_completion_function) {
         $readline::rl_completion_function =
           sub { $o -> _complete_cli(@_)} ;
     }
@@ -313,13 +318,13 @@ Options:
                       -comp => \&my_completion_function,
                     ) ;
 
-This is function adds an command item to the command tree. Its options are complected, but useful (or so I hope).
+This is function adds an command item to the command tree. It is a little complicated, but useful (or so I hope).
 
 =over
 
 =item * -path
 
-Mandatory. Expecting a string.
+B<Mandatory. Expecting a string.>
 This string would be parsed as multi-words command.
 
 Note: by default, this module expects whitespaces delimiter. If you'll read the module's code, you can find
@@ -327,59 +332,66 @@ an easy way to change it - in unlikely case you'll find it useful.
 
 =item * -exec
 
-Mandatory. Expecting a function ref.
+B<Mandatory. Expecting a function ref.>
 This code would be called when the user types a unique path for this command (with optional
 options and arguments). Parameters sent to this code are:
-    my ($cli, %p) = @_ ;
-where:
-   $cli     - self object.
-   $p{ARG0} - the command's full path (user might have used partial, but unique path. but this is the full explicit one)
-   $p{ARGV} - all user arguments, in order (ARRAY ref)
-   %p       - contains other options (see 'opts' below)
+
+   my ($cli, %p) = @_ ;
+   #  where:
+   # $cli     - self object.
+   # $p{ARG0} - the command's full path (user might have used partial but unique path. This is the explicit path)
+   # $p{ARGV} - all user arguments, in order (ARRAY ref)
+   # %p       - contains other options (see 'opts' below)
 
 =item * -help
 
-Expecting a multi line string.
+B<Expecting a multi line string.>
 The top line would be presented when a one line title is needed (for example, when 'help -tree'
 is called), the whole string would be presented as the full help for this item.
 
 =item * -comp
 
-Expecting CODE, or ARRAY ref.
+B<Expecting CODE, or ARRAY ref.>
 If Array, when user hits tab completion for this command, try to complete his input with words
 from this list.
 If Code, call this function with the next parameters:
-    my ($cli, $word, $line, $start) = @_ ;
-    # where:
-    # $cli is the Term::Shell::MultiCmd object.
-    # $word is the curent word
-    # $line is the whole line
-    # $start is the current location
+
+   my ($cli, $word, $line, $start) = @_ ;
+   #  where:
+   # $cli is the Term::Shell::MultiCmd object.
+   # $word is the curent word
+   # $line is the whole line
+   # $start is the current location
 
 This code should return a list of strings. Term::ReadLine would display those words (unless a single one)
 and complete user's line to the longest common part. In other words - it would do what you expect.
 
-For more information, see Term::ReadLine's man page.
+For more information, see Term::ReadLine.
 
 =item * -opts
 
-Expecting a string, or ARRAY ref.
+B<Expecting a string, or ARRAY ref.>
 If a string, split it to words by whitespaces. Those words are parsed as
 standard Getopt::Long options. For example:
+
      -opts => 'force name=s flag=i@'
 
 Would populating the previously described %p hash, correspond to user command:
+
      shell> user command -name="Some String" -flag 2 -flag 3 -flag 4 -force
+
+
+For more information, see Getopt::Long. Also see examples/multi_option.pl in distribution.
 
 As ARRAY ref, caller can also add a complete 'instruction' after each non-flag option (i.e. an option that
 expects parameters). Like the 'comp' above, this 'instruction' must be an ARRAY or CODE ref, and follow
-the same roles. If omitted, a default function would be called and ask user for input. For example:
+the same roles. If omitted, a default function would be called and ask user for input.
+For example:
+
     -opts => [ 'verbose' =>
                'file=s'  => \&my_filename_completion,
                'level=i' => [qw/1 2 3 4/],
              ],
-
-For more information, see Getopt::Long's man page. Also see examples/multi_option.pl in distribution.
 
 =back
 
@@ -427,9 +439,10 @@ sub add_exec {
 
 Although caller can set help via the add_exec, this command is useful when he wishes to
 add title (or hint) to a part of the command path. For example:
+
    # assume $cli with commands 'feature set', 'feature get', etc.
    $cli -> add_help ( -path => 'feature' ,
-                      -help => 'This feature is a secret') ;
+                      -help => 'This feature is about something') ;
 
 =cut
 
@@ -452,9 +465,10 @@ sub add_help {
 
 =head2 populate
 
-A is a convenient way to define a chain of add_exec and add_help commands. This function expects hash, where
+A convenient way to define a chain of add_exec and add_help commands. This function expects hash, where
 the key is the command path and the value might be HASH ref (calling add_exec), or a string (calling add_help).
 For example:
+
     $cli -> populate
        ( 'feature' => 'This feature is a secret',
          'feature set' => { help => 'help for feature set',
@@ -467,7 +481,9 @@ For example:
                           },
        ) ;
 
-Note: Since the key is the path, '-path' can (and should) be omitted from add_exec parameters.
+    # Note:
+    # - Since the key is the path, '-path' is omitted from parameters.
+    # - This function returns the self object, for easy chaining (as the synopsis demonstrates).
 
 =cut
 
@@ -493,7 +509,8 @@ sub populate {
 
 Prompt, parse, and invoke in endless loop
 
-('endless' shouldn't be taken literally. Eventually user quits, or system crashes, or universe collapses - They always do.)
+('endless loop' should never be taken literally. Users quit, systems crash, universes collapse -
+ and the loop reaches its last cycle)
 
 =cut
 
@@ -551,7 +568,7 @@ sub _complete_cli {
     #   1. complete command
     #   2. if current word starts with '-', complete option
     #   3. if previous word starts with '-', try arg completion
-    #   4. try cmd completion (should it overwirte 3 for default _expect_param_comp?)
+    #   4. try cmd completion (should it overwrite 3 for default _expect_param_comp?)
     #   5. show help, keep the line
 
     my @w = _split $o ,        # should I ignore the rest of the line?
@@ -659,7 +676,8 @@ sub _help_command_comp {
 
  $cli -> cmd ( "help -tree" ) ;
 
-Execute the given string parameter, similarly to user input.
+Execute the given string parameter, similarly to user input. This one might be useful to execute
+commands in a script, or testings.
 
 =cut
 
@@ -696,7 +714,7 @@ sub cmd {
 
 =head2 history
 
-set/get history
+set/get history 
 
   my @hist = $cli -> history() ;            # get history
   $cli -> history( @alternative_history ) ; # set history
@@ -741,6 +759,10 @@ Please report any bugs or feature requests to me, or to C<bug-term-cli at rt.cpa
 the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Term-CLI>.
 I am grateful for your feedback.
 
+=head2 TODO list
+
+nImplement pager.
+
 =head1 SUPPORT
 
 You can find documentation for this module with the perldoc command.
@@ -772,8 +794,7 @@ L<http://search.cpan.org/dist/Term-CLI/>
 
 =head1 ACKNOWLEDGMENTS
 
-This module was inspired by the excellent modules Term::Shell,CPAN, and
-CPANPLUS::Shell.
+This module was inspired by the excellent modules Term::Shell, CPAN, and CPANPLUS::Shell.
 
 =head1 LICENSE AND COPYRIGHT
 
