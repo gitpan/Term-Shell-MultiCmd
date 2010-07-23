@@ -16,6 +16,11 @@ Revision history for Term-Shell-MultiCmd
 1.04   2010-07-16
        More POD format & grammer fixes.
 
+1.05   2010-07-23
+       Initialize Term::ReadLine just before the loop
+       Support completion of hash keys
+       Some cleanup
+
 
 
 

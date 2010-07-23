@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Term-Shell-MultiCmd
-version:            1.04
+version:            1.05
 abstract:            Nested Commands Tree in Shell Interface
 author:
     - Josef Ezra <jezra@cpan.org>

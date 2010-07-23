@@ -11,7 +11,7 @@ Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
 =cut
 
-our $VERSION = '1.04';
+our $VERSION = '1.05';
 
 =head1 SYNOPSIS
 
@@ -79,7 +79,7 @@ sub _params($@) {
     my %ret ;
     my $str = shift ;
     for (split ' ', $str) {
-        /(\w+)(\=(.*))?/ or confess "_params can only take simple instructions
+        /(\w+)([\=\:](.*))?/ or confess "_params can only take simple instructions
 like key (must be provided), or key=value (value becomes default), or key= (default empty string)
 " ;
         $ret{$1} = $2 ? $3 : undef ;
@@ -90,11 +90,11 @@ like key (must be provided), or key=value (value becomes default), or key= (defa
     while (@_) {
         my ($k, $v) = (shift, shift) ;
         $k =~ s/^\-?\-?// unless ref $k ;
-        croak "unknown parameter: '$k'\n expected $str\n" unless exists $ret{$k} ;
+        croak "unknown parameter: '$k'\n expected params: $str\n" unless exists $ret{$k} ;
         $ret{$k} = $v ;
     } ;
     while (my ($k, $v) = each %ret) {
-        croak "missing parameter: '$k'\n expected $str\n" unless defined $v ;
+        croak "missing parameter: '$k'\n expected params: $str\n" unless defined $v ;
     }
     %ret
 }
@@ -112,7 +112,7 @@ sub _options {
         $p{_ERR_} = "$@ Expected " . join ', ', map {/(\w+)/ ; '-' . ($1 || $_)} sort @p ;
         $p{_ERR_} .= "\n" ;
     }
-    $p{ARGV} ||= [@ARGV] if @ARGV ; # if caller had chosen ARGV as parameter, maybe he knows what he's doing
+    $p{ARGV} ||= [@ARGV] ; # all the leftover, in order
     %p
 }
 
@@ -122,11 +122,13 @@ sub _say(@) { print join ('', @_) =~ /^\n*(.*?)\s*$/s, "\n" }
 
 # module specific functions
 
-# Note: manipulate $o->{delimiter} and $o->{delimiterRE} ONLY if you know what you're doing ...
+# Important Note:
+# Do manipulate $o->{delimiter} and $o->{delimiterRE} ONLY if you know what you're doing ...
+
 sub _split($$) {
     my ($o, $l) = @_ ;
     use Text::ParseWords 'quotewords';
-    grep {$_} quotewords $o->{delimiterRE} || '\s+', 0, $l
+    grep {defined $_} quotewords $o->{delimiterRE} || '\s+', 0, $l
 }
 
 sub _join($@) {
@@ -179,10 +181,13 @@ sub _expect_param_comp {
     ("Parameter Expected for -$op, type '$type'", $word)
 }
 
+my $dlm = $; ; # cache this value, in case the developer changes it on the fly.
+               # Should I make it explicit '\034' value?
+
 sub _filter($@) {
     my $w = shift ;
     my $qr = qr/^\Q$w/ ;
-    grep /$qr/, sort grep {$_ ne $;}
+    grep /$qr/, sort grep {$_ ne $dlm}
       'ARRAY'  eq ref $_[0] ? @{$_[0]} :
         'HASH' eq ref $_[0] ? (keys %{$_[0]}) :
           @_   ;
@@ -231,7 +236,7 @@ Overwrite the default 100 history entries to save in hisotry_file (if exists).
 
 =item * -history_more
 
-If the history_file exists, try to load this data from the file before the loop starts, and save it after.
+If the history_file exists, try to load this data from the file during initialization, and save it at loop end.
 For Example:
 
    my %user_defaults ;
@@ -253,7 +258,27 @@ to use it for sensitive data.
 
 =cut
 
-my $loop_stop ;
+sub _new_readline($) {
+    my $o = shift ;
+    use Term::ReadLine;
+    my $t = eval { local $SIG{__WARN__} = 'IGNORE' ;
+                   $o -> {term} = Term::ReadLine->new($o->{prompt}) } ;
+    if (not $t ) {
+        die "Can't create Term::ReadLine: $@\n" if -t select ;
+    }
+    elsif (defined $readline::rl_completion_function) {
+        $readline::rl_completion_function =
+          sub { $o -> _complete_cli(@_)} ;
+    }
+    elsif ( defined (my $attr = $t -> Attribs())) {
+        $attr->{attempted_completion_function} =
+          sub { $o -> _complete_gnu(@_) } ;
+    }
+    else {
+        warn __PACKAGE__ . ": no tab completion support for this system. Sorry.\n" ;
+    }
+    $t
+}
 sub new {
 
     my $class = shift ;
@@ -261,7 +286,7 @@ sub new {
                      history_file= history_size=100 history_more=
                      ', @_ ;
     # structure rules:
-    # hash ref is a path, keys are items (commands or paths) special item $; is one liner help
+    # hash ref is a path, keys are items (commands or paths) special item $dlm is one liner help
     # array ref is command's data as [help, command, options, completion]
     #  where: first help line is the one liner, default completion might be good enough
 
@@ -283,24 +308,10 @@ Options:
                      help => 'Exit this shell',
                    ) ;
 
-    use Term::ReadLine;
-    my $t = eval { local $SIG{__WARN__} = 'IGNORE' ;
-                   $o -> {term} = Term::ReadLine->new($o->{prompt}) } ;
-    if (not $t ) {
-        die "Can't create Term::ReadLine: $@\n" if -t select ;
-    }
-    elsif (defined $readline::rl_completion_function) {
-        $readline::rl_completion_function =
-          sub { $o -> _complete_cli(@_)} ;
-    }
-    elsif ( defined (my $attr = $t -> Attribs())) {
-        $attr->{attempted_completion_function} =
-          sub { $o -> _complete_gnu(@_) } ;
-    }
-    else {
-        warn __PACKAGE__ . ": no tab completion support for this system. Sorry.\n" ;
-    }
-
+    # _new_readline $o unless $DB::VERSION ; # Should I add parameter to prevent it?
+    #                                        # it could be useful when coder doesn't plan to use the loop
+    #   - on second thought, create it when you have to.
+    _last_setting_load $o ;
     $o
 }
 
@@ -347,9 +358,10 @@ is called), the whole string would be presented as the full help for this item.
 
 =item * -comp
 
-B<Expecting CODE, or ARRAY ref.>
+B<Expecting CODE, or ARRAY ref, or HASH ref.>
 If Array, when the user hits tab completion for this command, try to complete his input with words
 from this list.
+If Hash, using the hash keys as array, following the rule above.
 If Code, call this function with the next parameters:
 
    my ($cli, $word, $line, $start) = @_ ;
@@ -359,8 +371,8 @@ If Code, call this function with the next parameters:
    # $line is the whole line
    # $start is the current location
 
-This code should return a list of strings. Term::ReadLine would display those words (unless a single one)
-and complete user's line to the longest common part. In other words - it would do what you expect.
+This code should return a list of strings. Term::ReadLine would complete user's line to the longest
+common part, and display the list (unless unique). In other words - it would do what you expect.
 
 For more information, see Term::ReadLine.
 
@@ -387,6 +399,7 @@ For example:
     -opts => [ 'verbose' =>
                'file=s'  => \&my_filename_completion,
                'level=i' => [qw/1 2 3 4/],
+               'type=s'  => \%my_hash_of_types,
              ],
 
 =back
@@ -395,7 +408,7 @@ For example:
 
 sub add_exec {
     my $o = shift ;
-    my %p = _params 'path exec help= comp= opts=', @_ ;
+    my %p = _params 'path exec help= comp= opts= alias=', @_ ;
     return unless $p{path};     # let user's empty string prevent this command
     my $r = $o ->{cmds} ;
     my $p = '' ;
@@ -403,7 +416,7 @@ sub add_exec {
     my @w = _split $o, $p{path} ;
     my $new = pop @w or return ;
     for my $w (@w) {
-        $p .= "$w " ;
+        $p .= _join $o, $p, $w ;
         if ('ARRAY' eq ref $r ->{$w} ) {
             carp "Overwrite command '$p'\n" ;
             delete $r -> {$w} ;
@@ -418,7 +431,7 @@ sub add_exec {
             my $op = shift @opts ;
             croak "unexpected option completion\n" if ref $op ;
             $opts .= "$op " ;
-            my $expecting = $op =~ s/\=.*$// ;
+            my $expecting = $op =~ s/[\=\:].*$// ;
             $opts{$op} = ( $expecting  ?
                            ref $opts[0] ?
                            shift @opts :
@@ -450,7 +463,7 @@ sub add_help {
         for my $w (@args) {
             $cmd = ($cmd->{$w} = {});
         }
-        ($ret, $cmd->{$;}) = ($cmd->{$;}, $p{help})
+        ($ret, $cmd->{$dlm}) = ($cmd->{$dlm}, $p{help})
     }
     else {
         croak "command '$p{path}' does not exists.\n For sanity reasons, will not add help to non-existing commands\n" if @args;
@@ -546,7 +559,12 @@ sub _last_setting_save($) {
 sub loop {
     local $| = 1 ;
     my $o = shift ;
-    _last_setting_load $o ;
+
+    # _last_setting_load $o ;
+    # _ /\_ on second thought, it is better to load while initializing
+    # the object, letting the coder check those values before the loop.
+    _new_readline $o unless $o->{term} ;
+
     while ( not $o -> {stop} and
             defined (my $line = $o->{term}->readline($o->{prompt})) ) {
         $o->cmd( $line ) ;
@@ -581,10 +599,10 @@ sub _complete_cli {
         return ("Option $w[-1] is ambiguous: $op @op?", $word) if @op ;
         return ("Option $w[-1] is unknown", $word) unless $op ;
         my $cb = $opts{$op} ;
-        return _filter $word, $cb if 'ARRAY' eq ref $cb ;
+        return _filter $word, $cb if 'ARRAY' eq ref $cb or 'HASH' eq ref $cb ;
         return $cb->($o, $word, $line, $start, $op, $opts =~ /$op(\S*)/ ) if 'CODE' eq ref $cb ;
     }
-    return _filter $word, $comp if 'ARRAY' eq ref $comp ;
+    return _filter $word, $comp if 'ARRAY' eq ref $comp or 'HASH' eq ref $comp ;
     return $comp->($o, $word, $line, $start) if 'CODE' eq ref $comp ;
     return ($help, $word)       # so be it
 }
@@ -602,7 +620,7 @@ sub _help_message_tree {        # inspired by Unix 'tree' command
                             $c,
                             $pre ? $pre . ($last ? '    ' : '|   ') : ' ' ,
                             $c eq ($c[-1]||'')
-                          ) unless $c eq $; ;
+                          ) unless $c eq $dlm ;
     }
 }
 
@@ -621,10 +639,10 @@ sub _help_message {
     }
     elsif ($p{recursive}) {     # show everything
 
-        _say "$p:\t", $h->{$;} if exists $h->{$;} ;
+        _say "$p:\t", $h->{$dlm} if exists $h->{$dlm} ;
 
         for my $k (sort keys %$h) {
-            next if $k eq $; ;
+            next if $k eq $dlm ;
             _help_message( $o, %p, -node => $h->{$k}, -path => _join $o, $p, $k) ;
         }
     }
@@ -633,18 +651,18 @@ sub _help_message {
     }
     elsif ($p{full}) {          # prefix, full list
 
-        _say "$p:\t", $h->{$;} if exists $h->{$;} ;
+        _say "$p:\t", $h->{$dlm} if exists $h->{$dlm} ;
 
         for my $k (sort keys %$h) {
-            next if $k eq $; ;
+            next if $k eq $dlm ;
             _say _join($o, $p, $k), ": \t",
               (('ARRAY' eq ref $h->{$k}) ?
                ($h->{$k}[0]  || 'a command' ) :
-               ($h->{$k}{$;} || 'a prefix' ) ) =~ /^(.*)$/m ;
+               ($h->{$k}{$dlm} || 'a prefix' ) ) =~ /^(.*)$/m ;
         }
     }
     else {                      # just show the prefix with optional help
-        _say "$p: \t", $h->{$;} || 'A command prefix' ;
+        _say "$p: \t", $h->{$dlm} || 'A command prefix' ;
     }
 }
 
@@ -682,6 +700,7 @@ sub cmd {
     my @w = _split $o, shift or return ;
     my ($cmd, $path, @args) = _travel $o, @w ;
     return print $cmd unless ref $cmd ;
+    return _say "No such command or prefix: @args" if $cmd eq $o->{cmds} ;
     return _help_message($o, -node => $cmd, -path => $path) unless 'ARRAY' eq ref $cmd ; # help message
     my %p = _options $cmd->[3] || '', @args ;
     return print $p{_ERR_} if $p{_ERR_} ;
@@ -721,6 +740,7 @@ set/get history
 
 sub history {
     my $o = shift ;
+    return unless $o->{term} ;
     return $o->{term}->SetHistory(map {('ARRAY' eq ref $_) ? (@$_) : ($_)} @_ ) if @_ ;
     return $o->{term}->GetHistory
 }
