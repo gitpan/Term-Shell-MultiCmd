@@ -8,7 +8,7 @@ Revision history for Term-Shell-MultiCmd
        After more work, it seems to be mature enough to be cpan uploaded.
 
 1.02   2010-07-15
-       Eliminated one test, which seems to fail in Term::ReadLine (regardless this module)
+       Eliminated one test, which seems to fail in Term::ReadLine (regardless this module).
 
 1.03   2010-07-15
        POD format fixes, avoid another test fail case when /dev/tty is not readable.
@@ -17,13 +17,12 @@ Revision history for Term-Shell-MultiCmd
        More POD format & grammer fixes.
 
 1.05   2010-07-23
-       Initialize Term::ReadLine just before the loop
-       Support completion of hash keys
-       Some cleanup
+       Initialize Term::ReadLine just before the loop.
+       Support completion of hash keys.
+       Some cleanup.
 
+1.05   2010-08
+       Support optional parameters to flags.
 
-
-
-
-       
-
+1.06   2010-09-21
+       Support root command

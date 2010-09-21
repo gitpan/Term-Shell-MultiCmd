@@ -11,7 +11,7 @@ Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
 =cut
 
-our $VERSION = '1.05';
+our $VERSION = '1.06';
 
 =head1 SYNOPSIS
 
@@ -108,7 +108,7 @@ sub _options {
     # use Getopt::Long 'GetOptionsFromArray' ; -- didn't work as I expected ..
     use Getopt::Long ;
     local @ARGV = @_ ;
-    unless ( eval { GetOptions( \%p, @p ) } ) {
+    if (@p and not eval { GetOptions( \%p, @p ) }) {
         $p{_ERR_} = "$@ Expected " . join ', ', map {/(\w+)/ ; '-' . ($1 || $_)} sort @p ;
         $p{_ERR_} .= "\n" ;
     }
@@ -136,11 +136,10 @@ sub _join($@) {
     join $o->{delimiter} || ' ', @_
 }
 
-sub _travel($@) {
-    my ($o, @w) = @_ ;
-    my $c = $o->{cmds} ;
+sub _travelr($$@) {
+    my ($c, $d, @w) = @_ ;
     my @path ;
-    while( @w and 'HASH' eq ref $c ) {
+    while ( @w and 'HASH' eq ref $c ) {
         my $w = shift @w ;
         if (exists $c->{$w}) {
             $c = $c->{$w} ;
@@ -154,7 +153,7 @@ sub _travel($@) {
             next ;
         }
         if (@c > 1 ) {
-            my $cmd = join $o->{delimiter} || ' ', @path, $w ;
+            my $cmd = join $d, @path, $w ;
             return "Ambiguous command: '$cmd'\n $w could mean: @c\n" ;
         }
 
@@ -162,7 +161,22 @@ sub _travel($@) {
         unshift @w, $w ;
         last ;
     }
-    ($c, join ($o->{delimiter} || ' ', @path), @w)
+    ($c, join ($d, @path), @w)
+}
+
+sub _travel($@) {
+    my ($o) = shift ;
+    # my $rootre = $o->{rootRE} || qr/\s*[\\\/]\s*/ ;
+    # # set $o->{rootRE} only if you know what you're doing ..
+    # if ($_[0] and
+    #     $_[0] =~s/^$rootre//) {
+    #     $_[0] or shift
+    # }
+    # elsif ($o->{root}) {
+    #     my @res = _travelr $o->{root}, $o, @_ ;
+    #     return @res if $res[0] and $res[0] != $o->{root} ;
+    # }
+    _travelr $o->{root} || $o->{cmds}, $o->{delimiter} || ' ', @_
 }
 
 sub _expect_param_comp {
@@ -171,13 +185,14 @@ sub _expect_param_comp {
     # caller can use any of them. However, my parsing would
     # be limited.
     print "$opt\n" ;
-    my ($t) = $opt =~ /(\=\w)\W*$/ ;
-    # $t or return ('', $word) ;q
-    my $type = {'=i' => 'Integer',
-                '=o' => 'Extended Integer',
-                '=s' => 'String',
-                '=f' => 'Real Number',
-               }->{$t} || $t ;
+    my ($eq, $t) = $opt =~ /([\=\:])(\w)\W*$/ ;
+    my $type = ($t ?
+                $t eq 'i' ? 'Integer':
+                $t eq 'o' ? 'Extended Integer':
+                $t eq 's' ? 'String' :
+                $t eq 'f' ? 'Real Number' :
+                $t : $t ) ;
+    $type = "(optional) $type" if $eq eq ':' ;
     ("Parameter Expected for -$op, type '$type'", $word)
 }
 
@@ -209,21 +224,39 @@ Optional Parameters for the new command:
 
 =item * -prompt
 
-    my $cli = Term::Shell::MultiCmd ( -prompt => 'myprompt> ') ;
+    my $cli = new Term::Shell::MultiCmd ( -prompt => 'myprompt') ;
+- or -
+    my $cli = mew Term::Shell::MultiCmd ( -prompt => \&myprompt) ;
 
-Overwrite the default prompt 'shell> '.
+Overwrite the default prompt 'shell'.
+Rules are:
+
+ If prompt is a CODE reference, call it in each loop cycle and display the results.
+ if it ends with a non-word character, display it as is.
+ Else, display it with the root-path (if exists) and '> ' characters.
 
 =item * -help_cmd
 
-Overwrite the default 'help' command, empty string would skip adding this command.
+Overwrite the default 'help' command, empty string would disable this command.
 
 =item * -quit_cmd
 
-Overwrite the default 'quit' command, empty string would skip adding this command.
+Overwrite the default 'quit' command, empty string would disable this command.
+
+=item * -root_cmd
+
+    my $cli = new Term::Shell::MultiCmd ( -root_cmd => 'root' ) ;
+
+This would enable the root command and set it to root.
+
+Unlike 'quit' and 'help', the 'root' command is a little unexpected. Therefore it is disabled by default. I
+strongly recommend enabling this command when implementing a big, deep command tree. This allows the user rooting
+in a node, then referring to this node thereafter. After enabling, use 'help root' (or whatever names you've chosen)
+for usage manual.
 
 =item * -history_file
 
-    my $cli = Term::Shell::MultiCmd ( -history_file => "$ENV{HOME}/.my_progarms_data" ) ;
+    my $cli = new Term::Shell::MultiCmd ( -history_file => "$ENV{HOME}/.my_progarms_data" ) ;
 
 This is the history file name. If present, try to load history from this file just
 before the loop command, and try saving history in this file after the loop command.
@@ -262,7 +295,7 @@ sub _new_readline($) {
     my $o = shift ;
     use Term::ReadLine;
     my $t = eval { local $SIG{__WARN__} = 'IGNORE' ;
-                   $o -> {term} = Term::ReadLine->new($o->{prompt}) } ;
+                   Term::ReadLine->new($o->_prompt)} ;
     if (not $t ) {
         die "Can't create Term::ReadLine: $@\n" if -t select ;
     }
@@ -279,10 +312,11 @@ sub _new_readline($) {
     }
     $t
 }
+
 sub new {
 
     my $class = shift ;
-    my %p = _params 'pager= help_cmd=help quit_cmd=quit prompt=shell>
+    my %p = _params 'pager= help_cmd=help quit_cmd=quit root_cmd=root prompt=shell>
                      history_file= history_size=100 history_more=
                      ', @_ ;
     # structure rules:
@@ -291,23 +325,12 @@ sub new {
     #  where: first help line is the one liner, default completion might be good enough
 
     my $o = bless { cmds => { },
-                    map {($_, $p{$_})} qw/prompt pager history_file history_size history_more/
+                    map {($_, $p{$_})} qw/prompt pager history_file history_size history_more
+                                          help_cmd quit_cmd root_cmd
+                                         /
                   }, ref ( $class ) || $class ;
 
-    $o -> add_exec ( path => $p{help_cmd},
-                     exec => \&_help_command,
-                     comp => \&_help_command_comp,
-                     opts => 'recursive tree',
-                     help => 'help [command or prefix]
-Options:
-  -t --tree      : Show commands tree
-  -r --recursive : Show full help instead of title, recursively
-'                   ) ;
-    $o -> add_exec ( path => $p{quit_cmd},
-                     exec => sub {$_[0]->{stop} = 1 },
-                     help => 'Exit this shell',
-                   ) ;
-
+    $o -> _root_cmds_set() ;
     # _new_readline $o unless $DB::VERSION ; # Should I add parameter to prevent it?
     #                                        # it could be useful when coder doesn't plan to use the loop
     #   - on second thought, create it when you have to.
@@ -315,6 +338,54 @@ Options:
     $o
 }
 
+sub _root_cmds_clr($) {
+    my $o = shift ;
+    my $root = $o->{root};
+    return unless $root and $o->{cmds} != $root ;
+    for ([$o->{help_cmd}, \&_help_command],
+         [$o->{quit_cmd}, \&_quit_command],
+         [$o->{root_cmd}, \&_root_command],
+        ) {
+        delete $root->{$_->[0]} if exists $root->{$_->[0]} and $root->{$_->[0]}[1] eq $_->[1]
+    }
+    delete $o->{root} ;
+    delete $o->{root_path} ;
+}
+
+sub _root_cmds_set($;$$) {
+    my ($o, $root, $path) = @_ ;
+    ($root, $o->{cmds}) = ($o->{cmds}, $root) if $root ;
+    $o -> add_exec ( path => $o->{help_cmd},
+                     exec => \&_help_command,
+                     comp => \&_help_command_comp,
+                     opts => 'recursive tree',
+                     help => 'help [command or prefix]
+Options:
+$PATH -t --tree      : Show commands tree
+$PATH -r --recursive : Show full help instead of title, recursively'
+                   ) ;
+
+    $o -> add_exec ( path => $o->{quit_cmd},
+                     exec => \&_quit_command,
+                     help => 'Exit this shell',
+                   ) ;
+
+    $o -> add_exec ( path => $o->{root_cmd},
+                     exec => \&_root_command,
+                     comp => \&_root_command_comp,
+                     # opts => 'set display clear', - use its own completion
+                     help => 'set the root node
+Usage:
+$PATH -set a path to node: set the current root at \'a path to node\'
+$PATH -clear             : set the root to real root (same as -set without parameters)
+$PATH -display           : display the current root (if any)
+$PATH a path to command -with options
+                         : execute command from real root, options would be forwarded
+                         : to the command.
+'
+                   ) ;
+    ($o->{root}, $o->{cmds}, $o->{root_path}) = ($o->{cmds}, $root, $path) if $root ;
+}
 
 =head2 add_exec
 
@@ -408,7 +479,7 @@ For example:
 
 sub add_exec {
     my $o = shift ;
-    my %p = _params 'path exec help= comp= opts= alias=', @_ ;
+    my %p = _params 'path exec help= comp= opts=', @_ ;
     return unless $p{path};     # let user's empty string prevent this command
     my $r = $o ->{cmds} ;
     my $p = '' ;
@@ -512,17 +583,6 @@ sub populate {
     $o
 }
 
-=head2 loop
-
-  $cli -> loop ;
-
-Prompt, parse, and invoke in an endless loop
-
-('endless loop' should never be taken literally. Users quit, systems crash, universes collapse -
- and the loop reaches its last cycle)
-
-=cut
-
 sub _last_setting_load($) {
     my $o = shift ;
     my $f = $o->{history_file} or return ;
@@ -556,23 +616,40 @@ sub _last_setting_save($) {
     }
 }
 
+sub _prompt() {
+        my $o = shift ;
+    my $p = $o->{prompt} || 'shell' ;
+    return $p->()  if 'CODE' eq ref $p ;
+    return $p      if $p =~ /\W$/ ;
+    $p .= ':' . $o->{root_path} if $o->{root_path} ;
+    $p .  '> '
+}
+
+=head2 loop
+
+  $cli -> loop ;
+
+Prompt, parse, and invoke in an endless loop
+
+('endless loop' should never be taken literally. Users quit, systems crash, universes collapse -
+ and the loop reaches its last cycle)
+
+=cut
+
 sub loop {
     local $| = 1 ;
     my $o = shift ;
 
-    # _last_setting_load $o ;
-    # _ /\_ on second thought, it is better to load while initializing
-    # the object, letting the coder check those values before the loop.
-    _new_readline $o unless $o->{term} ;
+    $o-> {term} ||= _new_readline $o ;
 
     while ( not $o -> {stop} and
-            defined (my $line = $o->{term}->readline($o->{prompt})) ) {
+            defined (my $line = $o->{term}->readline($o->_prompt)) ) {
         $o->cmd( $line ) ;
     }
     _last_setting_save $o ;
 }
 
-sub _complete_gnu {
+sub _complete_gnu {    
     # my($o, $text, $line, $start, $end) = @_;
    &_complete_cli                # apparently, this should work
 }
@@ -593,8 +670,9 @@ sub _complete_cli {
     return _filter $word, $cmd if 'HASH' eq ref $cmd ;
 
     my ($help, $exec, $comp, $opts, %opts) = @{ $cmd } ; # avoid confusion
+    return &_root_command_comp if $comp and $comp == \&_root_command_comp ; # very special case: root 'imports' its options.
     return map {"$1$_"} _filter $2,\%opts if $word =~ /^(\-\-?)(.*)/ ;
-    if ( $w[-1] =~ /^\-\-?(.*)/ ) {
+    if ( $w[-1] =~ /^\-\-?(.*)/) {
         my ($op, @op) = _filter $1, \%opts ;
         return ("Option $w[-1] is ambiguous: $op @op?", $word) if @op ;
         return ("Option $w[-1] is unknown", $word) unless $op ;
@@ -606,7 +684,6 @@ sub _complete_cli {
     return $comp->($o, $word, $line, $start) if 'CODE' eq ref $comp ;
     return ($help, $word)       # so be it
 }
-
 
 sub _help_message_tree {        # inspired by Unix 'tree' command
                                 # Should I add ANSI colors?
@@ -631,8 +708,10 @@ sub _help_message {
     $p =~ s/^\s*(.*?)\s*$/$1/ ;
 
     if ('ARRAY' eq ref $h) {    # simple command, full help
-        _say "$p:\n $h->[0]" ;
-        $h->[0]
+        my $help = $h->[0] ;
+        $help =~ s/\$PATH/$p{path}/g ;
+        _say "$p:\n $help" ;
+        $help
     }
     elsif ('HASH' ne ref $h) {  # this one shouldn't happen
         confess "bad item in help message: $h"
@@ -670,7 +749,7 @@ sub _help_command {
     my ($o, %p) = @_ ;
     my ($cmd, $path, @args) = _travel $o, @{$p{ARGV}} ;
     return _say $cmd unless ref $cmd ;
-    return _say "No such command or prefix: $path @args" if @args ;
+    return _say "No such command or prefix: " . _join $o, $path, @args if @args ;
     return _help_message($o, -node => $cmd, -path => $path, -full => 1, %p) ;
 }
 
@@ -683,6 +762,61 @@ sub _help_command_comp {
     return ($cmd, $word) unless ref $cmd ;
     return _filter $word, $cmd if 'HASH' eq ref $cmd ;
     ('', $word)
+}
+
+sub _quit_command { $_[0]->{stop} = 1 }
+
+sub _root_command_comp {
+    my($o, $word, $line, $start) = @_;
+    $line =~ s/^(\s*\S+\s*(?:(\-\-?)(\w*))?)// ; # todo: delimiterRE
+    my ($prolog, $par, $param) = ($1, $2, $3) ;
+    return unless $prolog ;     # error, avoid recursion
+    return map {"$par$_"} _filter $param, qw/clear set display/ if $par and not $line ;
+    $line =~ s/^(\s*)// ;
+    $prolog .= $1 ;
+    my $root = delete $o -> {root} ;
+    my @res = _complete_cli($o, $word, $line, $start - length $prolog) ;
+    $o->{root} = $root if $root ;
+    @res
+}
+
+sub _root_command {
+    # root -display   : display current path
+    # root -set  path : set path
+    # root -clear     : alias to root -set  (without a path)
+    # root path params: execute path <params> from real command root
+
+    my ($o, %p) = @_ ;
+    my @argv = @{$p{ARGV}} ;
+    @argv  or return $o->cmd("help $p{ARG0}") ;
+    # algo: can't parse those options automaticaly, as it would prevent user's options to optional root commnad
+    $argv[0] =~ /^\-\-?d/ and return _say $o->{root} ? "root is set to '$o->{root_path}'" : "root is clear." ;
+    $argv[0] =~ /^\-\-?c/ and @argv = ('-set') ;
+    $argv[0] =~ /^\-\-?s/ or do {
+        # just do it, do it!
+        my $root = delete $o->{root} ;
+        my @res = $o->cmd(_join $o, @argv) ;
+        $o->{root} = $root if $root ;
+        return @res ;
+    } ;
+    shift @argv ; # -set, it is
+    my ($cmd, $path, @args) ;
+    if (@argv) {
+        my $root = delete $o->{root} ;
+        ($cmd, $path, @args) = _travel $o, @argv ;
+        $o->{root} = $root if $root ;
+        return _say $cmd unless ref $cmd ;
+        return _say "No such prefix: " . _join $o, $path, @args if @args ;
+        return _say "$path: is a command. Only a node can be set as root." if 'ARRAY' eq ref $cmd ;
+    }
+    if ( $o->{root}) {
+        _say "clear root '$o->{root_path}'" ;
+        _root_cmds_clr $o ;
+    }
+    if ( $cmd ) {
+        _root_cmds_set $o, $cmd, $path ;
+        _say "set new root: '$path'" ;
+    }
 }
 
 
@@ -700,7 +834,7 @@ sub cmd {
     my @w = _split $o, shift or return ;
     my ($cmd, $path, @args) = _travel $o, @w ;
     return print $cmd unless ref $cmd ;
-    return _say "No such command or prefix: @args" if $cmd eq $o->{cmds} ;
+    return _say "No such command or prefix: " . _join $o, @args if $cmd eq $o->{cmds} ;
     return _help_message($o, -node => $cmd, -path => $path) unless 'ARRAY' eq ref $cmd ; # help message
     my %p = _options $cmd->[3] || '', @args ;
     return print $p{_ERR_} if $p{_ERR_} ;
@@ -717,7 +851,7 @@ sub cmd {
     # if ($fh) {
     #     $fh -> close () ;
     #     # Todo: Pager Support
-    #     # use Term::ReadKey ;
+    #     # usep Term::ReadKey ;
     #     # my $hight = Term::ReadKey::GetTerminalSize($stdout) ;
 
     #     system "$pg $fn" ;
@@ -725,6 +859,27 @@ sub cmd {
     # print "\n"
 
     $res
+}
+
+=head2 complete
+
+  my ($base_line, @word_list) = $cli -> complete ($a_line) ;
+
+given a line, this function would return a base line (i.e. truncated to the beginning of the last word), and a list of potential
+completions. Added to the 'cmd' command, this might be useful when module user implements his own 'loop' command in a non-terminal
+application
+
+=cut
+
+sub complete {
+    # line, pos ==> line, list of words
+    my ($o, $line, $pos) = @_ ;
+    my $lo = substr $line, $pos, -1, '' if defined $pos ;
+    my $lu = $line ;
+    $lu =~ s/([^\s]*)$// ; # todo: ^delimiterRE
+    my $w = $1 ||  '' ;
+    my (@list) = _complete_cli($o, $w, $line, $pos || length $lu) ;
+    ($lu, @list)
 }
 
 =head2 history
