@@ -26,3 +26,7 @@ Revision history for Term-Shell-MultiCmd
 
 1.06   2010-09-21
        Support root command
+
+1.07   2010-10-21
+       Support pager
+

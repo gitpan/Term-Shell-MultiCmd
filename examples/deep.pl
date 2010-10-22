@@ -8,11 +8,8 @@ use strict ;
 use warnings ;
 use lib 'lib', '../lib' ;
 use Term::Shell::MultiCmd;
-my $cmd = { help => " Meaningless Function
-This is the default self description command
-for all items in this example.
-Have you tried the 'help -tree' command?
-It is inspired by the old unix 'tree' command",
+my $cmd = { help => " The default function.
+All I do is printing my own name.",
             exec => sub {
                 my ($o, %p) = @_ ;
                 print "I am $p{ARG0}\n" ;
@@ -21,7 +18,7 @@ It is inspired by the old unix 'tree' command",
 
 my $allCommands = <<AllCommands ;
 a very deep command tree, by Dr. Seuss
-as you all know, Dr. Seuss was a great perl programmer
+as we all suspected, Dr. Seuss was a perl programmer
 I could not, would not, in a house.
 I would not, could not, with a mouse.
 I would not eat them with a fox.
@@ -32,6 +29,13 @@ I would not eat green eggs and ham.
 I do not like them, Sam-I-am
 AllCommands
 
+
+print <<"Hi" ;
+$allCommands
+
+To rebuild the sentences, try to use the command completion.
+To see the whole command tree, try "help -t"
+Hi
 
 Term::Shell::MultiCmd
   -> new()

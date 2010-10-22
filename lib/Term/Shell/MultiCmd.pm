@@ -11,7 +11,7 @@ Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
 =cut
 
-our $VERSION = '1.06';
+our $VERSION = '1.07';
 
 =head1 SYNOPSIS
 
@@ -136,9 +136,9 @@ sub _join($@) {
     join $o->{delimiter} || ' ', @_
 }
 
-sub _travelr($$@) {
-    my ($c, $d, @w) = @_ ;
-    my @path ;
+sub _travela($@) {              # explicit array
+    my ($o) = shift ;
+    my ($c, $d, @w, @path) = ($o->{root} || $o->{cmds}, $o->{delimiter} || ' ', @_ );
     while ( @w and 'HASH' eq ref $c ) {
         my $w = shift @w ;
         if (exists $c->{$w}) {
@@ -164,19 +164,9 @@ sub _travelr($$@) {
     ($c, join ($d, @path), @w)
 }
 
-sub _travel($@) {
-    my ($o) = shift ;
-    # my $rootre = $o->{rootRE} || qr/\s*[\\\/]\s*/ ;
-    # # set $o->{rootRE} only if you know what you're doing ..
-    # if ($_[0] and
-    #     $_[0] =~s/^$rootre//) {
-    #     $_[0] or shift
-    # }
-    # elsif ($o->{root}) {
-    #     my @res = _travelr $o->{root}, $o, @_ ;
-    #     return @res if $res[0] and $res[0] != $o->{root} ;
-    # }
-    _travelr $o->{root} || $o->{cmds}, $o->{delimiter} || ' ', @_
+sub _travel($$) {
+    my ($o, $c) = &_check_pager ; # clear $c pager sign, let cmd know about it.
+    _travela( $o, _split $o, $c )
 }
 
 sub _expect_param_comp {
@@ -287,6 +277,26 @@ Note that the value of history_more must be a reference for HASH, ARRAY, or SCAL
 no warnings would be provided if any of the operations fail. It wouldn't be a good idea
 to use it for sensitive data.
 
+=item * -pager
+
+As pager's value, this module would expect a string or a sub that returns a FileHandle. If the value is a string,
+it would be converted to:
+
+   sub { use FileHandle ; new FileHandle "| $value_of_pager" }
+
+When appropriate, the returned file handle would be selected before user's command execution, the old
+one would be restored afterward. The next example should work on most posix system:
+
+   my $cli = new Term::Shell::MultiCmd ( -pager => 'less -rX',
+
+The default pager's value is empty string, which means no pager manipulations.
+
+=item * -pager_re
+
+Taking after perldb, the default value is '^\|' (i.e. a regular expression that matches '|' prefix, as in
+the user's command "| help"). If the value is set to an empty string (or qr//), every user command would trigger
+the pager.
+
 =back
 
 =cut
@@ -314,11 +324,11 @@ sub _new_readline($) {
 }
 
 sub new {
-
     my $class = shift ;
-    my %p = _params 'pager= help_cmd=help quit_cmd=quit root_cmd=root prompt=shell>
-                     history_file= history_size=100 history_more=
+    my %p = _params 'help_cmd=help quit_cmd=quit root_cmd= prompt=shell>
+                     history_file= history_size=100 history_more= pager= pager_re=^\|
                      ', @_ ;
+
     # structure rules:
     # hash ref is a path, keys are items (commands or paths) special item $dlm is one liner help
     # array ref is command's data as [help, command, options, completion]
@@ -326,10 +336,12 @@ sub new {
 
     my $o = bless { cmds => { },
                     map {($_, $p{$_})} qw/prompt pager history_file history_size history_more
-                                          help_cmd quit_cmd root_cmd
+                                          help_cmd quit_cmd root_cmd pager pager_re
                                          /
                   }, ref ( $class ) || $class ;
 
+    $o -> {delimiter  } = ' '   ; # now, programmers can manipulate the next two values after creating the object,
+    $o -> {delimiterRE} = '\s+' ; # but they must be smart enough to read this code. - jezra
     $o -> _root_cmds_set() ;
     # _new_readline $o unless $DB::VERSION ; # Should I add parameter to prevent it?
     #                                        # it could be useful when coder doesn't plan to use the loop
@@ -374,10 +386,10 @@ $PATH -r --recursive : Show full help instead of title, recursively'
                      exec => \&_root_command,
                      comp => \&_root_command_comp,
                      # opts => 'set display clear', - use its own completion
-                     help => 'set the root node
+                     help => 'Execute from, or Set, the root node
 Usage:
 $PATH -set a path to node: set the current root at \'a path to node\'
-$PATH -clear             : set the root to real root (same as -set without parameters)
+$PATH -clear             : set the root to real root (alias to -set without parameters)
 $PATH -display           : display the current root (if any)
 $PATH a path to command -with options
                          : execute command from real root, options would be forwarded
@@ -529,7 +541,7 @@ add title (or hint) to a part of the command path. For example:
 sub add_help {
     my $o = shift ;
     my %p = _params "path help", @_ ;
-    my ($cmd, $path, @args, $ret) = _travel $o, _split $o, $p{path} ;
+    my ($cmd, $path, @args, $ret) = _travel $o, $p{path} ; # _split $o, $p{path} ;
     if ('HASH' eq ref $cmd) {
         for my $w (@args) {
             $cmd = ($cmd->{$w} = {});
@@ -612,7 +624,7 @@ sub _last_setting_save($) {
         open  F, '>', $f or return ;
         print F Dumper [[@his], $o->{history_more}] ; # Note: For backward compatibly, this array can only grow
         close F ;               # why bother closing? darn habits
-        # print ":Status saved: $f\n" ;
+        print "Configuration saved in $f\n" ;
     }
 }
 
@@ -662,20 +674,20 @@ sub _complete_cli {
     #   4. try cmd completion (should it overwrite 3 for default _expect_param_comp?)
     #   5. show help, keep the line
 
-    my @w = _split $o ,        # should I ignore the rest of the line?
-      substr $line, 0, $start ; # well, Term::ReadLine expects words list.
+    # my @w = _split $o ,        # should I ignore the rest of the line?
+    #   substr $line, 0, $start ; # well, Term::ReadLine expects words list.
 
-    my ($cmd, $path, @args) = _travel $o, @w ;
+    my ($cmd, $path, @args) = _travel $o, substr $line, 0, $start ; # @w ;
     return ($cmd, $word) unless ref $cmd ;
     return _filter $word, $cmd if 'HASH' eq ref $cmd ;
 
     my ($help, $exec, $comp, $opts, %opts) = @{ $cmd } ; # avoid confusion
     return &_root_command_comp if $comp and $comp == \&_root_command_comp ; # very special case: root 'imports' its options.
     return map {"$1$_"} _filter $2,\%opts if $word =~ /^(\-\-?)(.*)/ ;
-    if ( $w[-1] =~ /^\-\-?(.*)/) {
+    if ( @args and $args[-1] =~ /^\-\-?(.*)/) {
         my ($op, @op) = _filter $1, \%opts ;
-        return ("Option $w[-1] is ambiguous: $op @op?", $word) if @op ;
-        return ("Option $w[-1] is unknown", $word) unless $op ;
+        return ("Option $args[-1] is ambiguous: $op @op?", $word) if @op ;
+        return ("Option $args[-1] is unknown", $word) unless $op ;
         my $cb = $opts{$op} ;
         return _filter $word, $cb if 'ARRAY' eq ref $cb or 'HASH' eq ref $cb ;
         return $cb->($o, $word, $line, $start, $op, $opts =~ /$op(\S*)/ ) if 'CODE' eq ref $cb ;
@@ -747,7 +759,7 @@ sub _help_message {
 
 sub _help_command {
     my ($o, %p) = @_ ;
-    my ($cmd, $path, @args) = _travel $o, @{$p{ARGV}} ;
+    my ($cmd, $path, @args) = _travela $o, @{$p{ARGV}} ;
     return _say $cmd unless ref $cmd ;
     return _say "No such command or prefix: " . _join $o, $path, @args if @args ;
     return _help_message($o, -node => $cmd, -path => $path, -full => 1, %p) ;
@@ -757,7 +769,7 @@ sub _help_command_comp {
     my($o, $word, $line, $start) = @_;
     my @w = _split $o , substr $line, 0, $start ;
     shift @w ;
-    my ($cmd, $path, @args) = _travel $o, grep {!/\-\-?r(?:ecursive)?|\-\-?t(?:ree)?/} @w ;
+    my ($cmd, $path, @args) = _travela $o, grep {!/\-\-?r(?:ecursive)?|\-\-?t(?:ree)?/} @w ;
                              # potential issue: 'help -r some path' wouldn't be a valid path, is DWIM the solution?
     return ($cmd, $word) unless ref $cmd ;
     return _filter $word, $cmd if 'HASH' eq ref $cmd ;
@@ -803,7 +815,7 @@ sub _root_command {
     my ($cmd, $path, @args) ;
     if (@argv) {
         my $root = delete $o->{root} ;
-        ($cmd, $path, @args) = _travel $o, @argv ;
+        ($cmd, $path, @args) = _travela $o, @argv ;
         $o->{root} = $root if $root ;
         return _say $cmd unless ref $cmd ;
         return _say "No such prefix: " . _join $o, $path, @args if @args ;
@@ -819,6 +831,15 @@ sub _root_command {
     }
 }
 
+sub _check_pager {
+    my ($o, $c) = @_ ;
+    my $p = $o->{pager} or return (@_, $o->{piper}=undef); # just in case programmer delete {pager} during run
+    ref $p or $o->{pager} = sub { use FileHandle ; new FileHandle "| $p" };
+    my $r = $o->{pager_re} ;
+    ref $r or $r = do{ my $d = "$r($o->{delimiterRE})*" ; $o->{pager_re} = qr/$d/};
+    $o->{piper} = $c =~ s/$r// ;
+    ($o, $c)
+}
 
 =head2 cmd
 
@@ -831,8 +852,8 @@ commands in a script, or testing.
 
 sub cmd {
     my $o = shift ;
-    my @w = _split $o, shift or return ;
-    my ($cmd, $path, @args) = _travel $o, @w ;
+    # my @w = _split $o, shift or return ;
+    my ($cmd, $path, @args) = _travel $o, shift or return ; # @w ;
     return print $cmd unless ref $cmd ;
     return _say "No such command or prefix: " . _join $o, @args if $cmd eq $o->{cmds} ;
     return _help_message($o, -node => $cmd, -path => $path) unless 'ARRAY' eq ref $cmd ; # help message
@@ -840,23 +861,16 @@ sub cmd {
     return print $p{_ERR_} if $p{_ERR_} ;
     my ($fh, $fn, $stdout, $pg) ;
 
-    # if ($pg = $o->{pager} and -x $pg ) {
-    #     use File::Temp 'tempfile' ;
-    #     ($fh, $fn) = tempfile() ;
-    #     $o->{stdout} = select $fh ;
-    # }
+    if ($o->{piper} and $fh = $o->{pager}->()) {
+        $o->{stdout} = select ;
+        select $fh ;
+    }
 
     my $res = $cmd->[1]->($o, ARG0 => $path, %p) ;
 
-    # if ($fh) {
-    #     $fh -> close () ;
-    #     # Todo: Pager Support
-    #     # usep Term::ReadKey ;
-    #     # my $hight = Term::ReadKey::GetTerminalSize($stdout) ;
-
-    #     system "$pg $fn" ;
-    # }
-    # print "\n"
+    if ($fh) {
+        select $o->{stdout} ;
+    }
 
     $res
 }

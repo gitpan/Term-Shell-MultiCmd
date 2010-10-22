@@ -2,6 +2,7 @@ Changes
 examples/deep.pl
 examples/help_titles.pl
 examples/multi_option.pl
+examples/pager.pl
 examples/synopsis.pl
 ignore.txt
 lib/Term/Shell/MultiCmd.pm
@@ -15,4 +16,5 @@ t/boilerplate.t
 t/manifest.t
 t/pod-coverage.t
 t/pod.t
+
 META.yml                                 Module meta-data (added by MakeMaker)
