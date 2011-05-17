@@ -11,7 +11,7 @@ Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
 =cut
 
-our $VERSION = '1.07';
+our $VERSION = '1.09';
 
 =head1 SYNOPSIS
 
@@ -128,7 +128,8 @@ sub _say(@) { print join ('', @_) =~ /^\n*(.*?)\s*$/s, "\n" }
 sub _split($$) {
     my ($o, $l) = @_ ;
     use Text::ParseWords 'quotewords';
-    grep {defined $_} quotewords $o->{delimiterRE} || '\s+', 0, $l
+    # grep {defined $_ and $_ ne ''} quotewords $o->{delimiterRE} || '\s+', 0, $l
+    grep {defined and length } quotewords $o->{delimiterRE} || '\s+', 0, $l
 }
 
 sub _join($@) {
@@ -174,7 +175,7 @@ sub _expect_param_comp {
     # This is ugly, Getopt::Long has many options, and
     # caller can use any of them. However, my parsing would
     # be limited.
-    print "$opt\n" ;
+    # print "$opt\n" ;
     my ($eq, $t) = $opt =~ /([\=\:])(\w)\W*$/ ;
     my $type = ($t ?
                 $t eq 'i' ? 'Integer':
@@ -183,7 +184,7 @@ sub _expect_param_comp {
                 $t eq 'f' ? 'Real Number' :
                 $t : $t ) ;
     $type = "(optional) $type" if $eq eq ':' ;
-    ("Parameter Expected for -$op, type '$type'", $word)
+    ("$opt\nParameter Expected for -$op, type '$type'", $word)
 }
 
 my $dlm = $; ; # cache this value, in case the developer changes it on the fly.
@@ -288,14 +289,28 @@ When appropriate, the returned file handle would be selected before user's comma
 one would be restored afterward. The next example should work on most posix system:
 
    my $cli = new Term::Shell::MultiCmd ( -pager => 'less -rX',
+                                         ...
 
 The default pager's value is empty string, which means no pager manipulations.
 
 =item * -pager_re
 
 Taking after perldb, the default value is '^\|' (i.e. a regular expression that matches '|' prefix, as in
-the user's command "| help"). If the value is set to an empty string (or qr//), every user command would trigger
+the user's command "| help"). If the value is set to an empty string, every command would trigger
 the pager.
+
+The next example would print any output to a given filehandle:
+
+   my $ret_value ;
+   my $cli = new Term::Shell::MultiCmd ( -pager => sub {
+                                               open my $fh, '>', \$ret_value or die "can't open FileHandle to string (no PerlIO?)\n" ;
+                                               $fh
+                                          },
+                                         -pager_re => '',
+                                       ) ;
+  # ...
+  $cli -> cmd ('help -t') ;
+  print "ret_value is:\n $ret_value" ;
 
 =back
 
@@ -305,7 +320,7 @@ sub _new_readline($) {
     my $o = shift ;
     use Term::ReadLine;
     my $t = eval { local $SIG{__WARN__} = 'IGNORE' ;
-                   Term::ReadLine->new($o->_prompt)} ;
+                   Term::ReadLine->new($o->prompt)} ;
     if (not $t ) {
         die "Can't create Term::ReadLine: $@\n" if -t select ;
     }
@@ -598,15 +613,13 @@ sub populate {
 sub _last_setting_load($) {
     my $o = shift ;
     my $f = $o->{history_file} or return ;
+    return unless -f $f ;
     my $d = $o->{history_more} ;
     eval {
-        open F, $f or return ;
-        local $/ ;
-        our $VAR1 ;
-        $VAR1 = eval <F> ;
-        my ($hist, $more) = @$VAR1 ;
-        close F ;
-        $o -> history ( @$hist ) if 'ARRAY' eq ref $hist ;
+        my $setting = eval { use Storable ; retrieve $f } ;
+        return print "Failed to load configuration from $f: $@\n" if $@ ;
+        my ($hist, $more) = @$setting ;
+        $o->{history_data} = $hist if 'ARRAY' eq ref $hist and @$hist ;
         return unless ref $d and ref $more and ref($d) eq ref($more) ;
         %$d = %$more if 'HASH'   eq ref $d ;
         @$d = @$more if 'ARRAY'  eq ref $d ;
@@ -617,24 +630,12 @@ sub _last_setting_load($) {
 sub _last_setting_save($) {
     my $o = shift ;
     my $f = $o->{history_file} or return ;
-    eval {
-        use Data::Dumper ;
-        my @his = $o -> history();
-        splice @his, 0,  @his - $o->{history_size} ;
-        open  F, '>', $f or return ;
-        print F Dumper [[@his], $o->{history_more}] ; # Note: For backward compatibly, this array can only grow
-        close F ;               # why bother closing? darn habits
-        print "Configuration saved in $f\n" ;
-    }
-}
-
-sub _prompt() {
-        my $o = shift ;
-    my $p = $o->{prompt} || 'shell' ;
-    return $p->()  if 'CODE' eq ref $p ;
-    return $p      if $p =~ /\W$/ ;
-    $p .= ':' . $o->{root_path} if $o->{root_path} ;
-    $p .  '> '
+    my @his = $o -> history();
+    splice @his, 0,  @his - $o->{history_size} ;
+    print
+      eval {use Storable ; store ([[@his], $o->{history_more}], $f)} ? # Note: For backward compatibly, this array can only grow
+        "Configuration saved in $f\n" :
+          "Failed to save configuration in $f: $@\n" ;
 }
 
 =head2 loop
@@ -653,15 +654,15 @@ sub loop {
     my $o = shift ;
 
     $o-> {term} ||= _new_readline $o ;
-
+    $o-> history($o->{history_data}) if $o->{history_data};
     while ( not $o -> {stop} and
-            defined (my $line = $o->{term}->readline($o->_prompt)) ) {
+            defined (my $line = $o->{term}->readline($o->prompt)) ) {
         $o->cmd( $line ) ;
     }
     _last_setting_save $o ;
 }
 
-sub _complete_gnu {    
+sub _complete_gnu {
     # my($o, $text, $line, $start, $end) = @_;
    &_complete_cli                # apparently, this should work
 }
@@ -679,7 +680,7 @@ sub _complete_cli {
 
     my ($cmd, $path, @args) = _travel $o, substr $line, 0, $start ; # @w ;
     return ($cmd, $word) unless ref $cmd ;
-    return _filter $word, $cmd if 'HASH' eq ref $cmd ;
+    return (@args ? "\a" : _filter $word, $cmd) if 'HASH' eq ref $cmd ;
 
     my ($help, $exec, $comp, $opts, %opts) = @{ $cmd } ; # avoid confusion
     return &_root_command_comp if $comp and $comp == \&_root_command_comp ; # very special case: root 'imports' its options.
@@ -729,11 +730,12 @@ sub _help_message {
         confess "bad item in help message: $h"
     }
     elsif ($p{recursive}) {     # show everything
-
-        _say "$p:\t", $h->{$dlm} if exists $h->{$dlm} ;
+        my $xxx = "----------------------\n" ;
+        _say $xxx, $p, ":\t", $h->{$dlm} if exists $h->{$dlm};
 
         for my $k (sort keys %$h) {
             next if $k eq $dlm ;
+            _say $xxx ;
             _help_message( $o, %p, -node => $h->{$k}, -path => _join $o, $p, $k) ;
         }
     }
@@ -836,8 +838,8 @@ sub _check_pager {
     my $p = $o->{pager} or return (@_, $o->{piper}=undef); # just in case programmer delete {pager} during run
     ref $p or $o->{pager} = sub { use FileHandle ; new FileHandle "| $p" };
     my $r = $o->{pager_re} ;
-    ref $r or $r = do{ my $d = "$r($o->{delimiterRE})*" ; $o->{pager_re} = qr/$d/};
-    $o->{piper} = $c =~ s/$r// ;
+    !$r or ref $r or $r = do{ my $d = "$r($o->{delimiterRE})*" ; $o->{pager_re} = qr/$d/};
+    $o->{piper} = !$r || $c =~ s/$r// ;
     ($o, $c)
 }
 
@@ -852,27 +854,44 @@ commands in a script, or testing.
 
 sub cmd {
     my $o = shift ;
-    # my @w = _split $o, shift or return ;
-    my ($cmd, $path, @args) = _travel $o, shift or return ; # @w ;
+    my ($cmd, $path, @args, $fh) = _travel $o, shift or return ;
+    local %SIG ;
+
+    if ($o->{piper} and $fh = $o->{pager}->()) {
+        $o->{stdout} = select ;
+        select $fh ;
+        $SIG{PIPE} = sub {} ;
+    }
+
+    my $res = $o->_cmd ($cmd, $path, @args) ;
+
+    if ($fh) {
+        select $o->{stdout} ;
+    }
+    $res
+}
+
+sub _cmd {
+    my ($o, $cmd, $path, @args) = @_ ;
     return print $cmd unless ref $cmd ;
     return _say "No such command or prefix: " . _join $o, @args if $cmd eq $o->{cmds} ;
     return _help_message($o, -node => $cmd, -path => $path) unless 'ARRAY' eq ref $cmd ; # help message
     my %p = _options $cmd->[3] || '', @args ;
     return print $p{_ERR_} if $p{_ERR_} ;
-    my ($fh, $fn, $stdout, $pg) ;
+    return $cmd->[1]->($o, ARG0 => $path, %p) ;
+}
 
-    if ($o->{piper} and $fh = $o->{pager}->()) {
-        $o->{stdout} = select ;
-        select $fh ;
-    }
+=head2 command
 
-    my $res = $cmd->[1]->($o, ARG0 => $path, %p) ;
+ $cli -> command ( "help -tree") ;
+Is the same as cmd, but echos the command before execution
 
-    if ($fh) {
-        select $o->{stdout} ;
-    }
+=cut
 
-    $res
+sub command {
+    my ($o, $cmd) = @_ ;
+    print "$cmd ..\n" ;
+    &cmd
 }
 
 =head2 complete
@@ -890,10 +909,35 @@ sub complete {
     my ($o, $line, $pos) = @_ ;
     my $lo = substr $line, $pos, -1, '' if defined $pos ;
     my $lu = $line ;
-    $lu =~ s/([^\s]*)$// ; # todo: ^delimiterRE
+    my $qd = $o -> {delimiterRE} ;
+    $lu =~ s/([^$qd]*)$// ;
     my $w = $1 ||  '' ;
     my (@list) = _complete_cli($o, $w, $line, $pos || length $lu) ;
+    # if ($lu =~ /^(.*)($qd+)$/) {
+    #     # this is duplicating what is done in _complete_cli, TODO: optimize
+    #     my ($l, $s) = ($1, $2 ) ;
+    #     my ($cmd, $path, @args) = _travel $o, $l ;
+    #     $lu = "$path$s" if $path and not @args ;
+    # }
     ($lu, @list)
+}
+
+=head2 prompt
+
+  my $prompt = $cli -> prompt() ;
+
+accepts no parameters, return current prompt.
+
+=cut
+
+
+sub prompt() {
+    my $o = shift ;
+    my $p = $o->{prompt} || 'shell' ;
+    return $p->()  if 'CODE' eq ref $p ;
+    return $p      if $p =~ /\W$/ ;
+    $p .= ':' . $o->{root_path} if $o->{root_path} ;
+    $p .  '> '
 }
 
 =head2 history

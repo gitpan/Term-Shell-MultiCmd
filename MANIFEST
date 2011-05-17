@@ -4,7 +4,8 @@ examples/help_titles.pl
 examples/multi_option.pl
 examples/pager.pl
 examples/synopsis.pl
-ignore.txt
+examples/redirect_output.pl
+examples/redirect_output2.pl
 lib/Term/Shell/MultiCmd.pm
 Makefile.PL
 MANIFEST

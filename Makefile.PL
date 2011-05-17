@@ -7,7 +7,7 @@ WriteMakefile(
     AUTHOR              => q{Josef Ezra <jezra@cpan.org>},
     VERSION_FROM        => 'lib/Term/Shell/MultiCmd.pm',
     ABSTRACT_FROM       => 'lib/Term/Shell/MultiCmd.pm',
-    ($ExtUtils::MakeMaker::VERSION >= 6.3002
+    (eval ($ExtUtils::MakeMaker::VERSION ||0) >= 6.3002
       ? ('LICENSE'=> 'perl')
       : ()),
     PL_FILES            => {},

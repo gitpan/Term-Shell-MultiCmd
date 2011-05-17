@@ -30,3 +30,12 @@ Revision history for Term-Shell-MultiCmd
 1.07   2010-10-21
        Support pager
 
+1.08   2010-12-22
+       add examples
+
+1.09   2011-05-17
+       add command with echo
+       history changes format
+       verbose saved file at exit
+       
+              
