@@ -11,7 +11,7 @@ Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
 =cut
 
-our $VERSION = '1.09';
+our $VERSION = '1.091';
 
 =head1 SYNOPSIS
 
@@ -330,7 +330,8 @@ sub _new_readline($) {
     }
     elsif ( defined (my $attr = $t -> Attribs())) {
         $attr->{attempted_completion_function} =
-          sub { $o -> _complete_gnu(@_) } ;
+          $attr->{completion_function} =
+            sub { $o -> _complete_gnu(@_) } ;
     }
     else {
         warn __PACKAGE__ . ": no tab completion support for this system. Sorry.\n" ;

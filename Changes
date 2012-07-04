@@ -38,4 +38,8 @@ Revision history for Term-Shell-MultiCmd
        history changes format
        verbose saved file at exit
        
-              
+1.091  2012-07-04
+       Small adjustment to Term::Readline's GNU mode
+       Special thanks to Ask Bjørn Hansen
+
+       
