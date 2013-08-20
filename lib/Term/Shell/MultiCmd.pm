@@ -11,7 +11,7 @@ Term::Shell::MultiCmd -  Nested Commands Tree in Shell Interface
 
 =cut
 
-our $VERSION = '1.091';
+our $VERSION = '1.093';
 
 =head1 SYNOPSIS
 
@@ -312,6 +312,17 @@ The next example would print any output to a given filehandle:
   $cli -> cmd ('help -t') ;
   print "ret_value is:\n $ret_value" ;
 
+=item * -record_cmd
+
+If it's a function ref, call it with an echo of the user's command
+
+   my $cli = new Term::Shell::MultiCmd ( -record_cmd => sub {
+                                            my $user_cmd = shift;
+                                            system "echo '$user_cmd' >> /tmp/history"
+                                          }
+                                       ) ;
+
+
 =back
 
 =cut
@@ -343,6 +354,7 @@ sub new {
     my $class = shift ;
     my %p = _params 'help_cmd=help quit_cmd=quit root_cmd= prompt=shell>
                      history_file= history_size=100 history_more= pager= pager_re=^\|
+                     record_cmd=
                      ', @_ ;
 
     # structure rules:
@@ -352,7 +364,7 @@ sub new {
 
     my $o = bless { cmds => { },
                     map {($_, $p{$_})} qw/prompt pager history_file history_size history_more
-                                          help_cmd quit_cmd root_cmd pager pager_re
+                                          help_cmd quit_cmd root_cmd pager pager_re record_cmd
                                          /
                   }, ref ( $class ) || $class ;
 
@@ -664,8 +676,8 @@ sub loop {
 }
 
 sub _complete_gnu {
-    # my($o, $text, $line, $start, $end) = @_;
-   &_complete_cli                # apparently, this should work
+    my($o, $text, $line, $start, $end) = @_;
+    $text, &_complete_cli       # apparently, this should work
 }
 
 sub _complete_cli {
@@ -854,8 +866,10 @@ commands in a script, or testing.
 =cut
 
 sub cmd {
-    my $o = shift ;
-    my ($cmd, $path, @args, $fh) = _travel $o, shift or return ;
+    my ($o, $clt) = @_;
+    $o->{record_cmd}->($clt) if 'CODE' eq ref $o->{record_cmd};
+
+    my ($cmd, $path, @args, $fh) = _travel $o, $clt or return ;
     local %SIG ;
 
     if ($o->{piper} and $fh = $o->{pager}->()) {
